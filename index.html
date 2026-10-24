@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Check-In</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1a1d21;--mu:#6b7280;--ac:#2563eb;--ok:#16a34a;--er:#dc2626;--bd:#e3e6ea}
+@media (prefers-color-scheme:dark){:root{--bg:#111317;--card:#1b1e24;--tx:#eceef1;--mu:#98a0ac;--ac:#60a5fa;--ok:#4ade80;--er:#f87171;--bd:#2c3038;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}
+input{width:100%;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:17px;margin-bottom:10px}
+button{padding:12px 16px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-size:16px}
+button.g{background:transparent;color:var(--ac);border:1px solid var(--bd)}
+button.full{width:100%}
+.mu{color:var(--mu);font-size:14px}
+.msg{padding:12px;border-radius:10px;margin-top:10px;font-weight:600}
+.msg.ok{color:var(--ok)}.msg.er{color:var(--er)}
+.big{font-size:20px;text-align:center;padding:12px 0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--bd)}
+.row:first-child{border-top:0}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.bar input{flex:1;min-width:120px;margin:0}
+.hide{display:none}
+#poster{display:none}
+@media print{
+  body *{visibility:hidden}
+  #poster,#poster *{visibility:visible}
+  #poster{display:block;position:absolute;inset:0;text-align:center;padding:40px;background:#fff;color:#000}
+  #poster h1{font-size:44px}#poster p{font-size:22px}
+  #posterQr{display:flex;justify-content:center;margin:30px 0}
+}
+</style>
+</head>
+<body>
+<main>
+
+<!-- ATTENDEE VIEW -->
+<section id="attendee">
+  <div class="card">
+    <h1>Welcome</h1>
+    <p class="mu">Please answer two quick questions.</p>
+    <label for="nm"><b>1. What is your name?</b></label>
+    <input id="nm" placeholder="Full name" autocomplete="name" maxlength="80">
+    <label for="arr"><b>2. What time did you arrive?</b></label>
+    <input id="arr" type="time">
+    <button class="full" id="go">Submit</button>
+    <div id="aMsg"></div>
+  </div>
+</section>
+
+<!-- ADMIN VIEW (open this page with #admin on the end) -->
+<section id="admin" class="hide">
+  <div class="card" id="login">
+    <h2>Admin login</h2>
+    <input id="em" type="email" placeholder="Email" autocomplete="username">
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="full" id="loginBtn">Log in</button>
+    <div id="lMsg"></div>
+  </div>
+
+  <div id="panel" class="hide">
+    <div class="card">
+      <div class="bar">
+        <input id="day" type="date">
+        <button id="refresh" class="g">Refresh</button>
+        <button id="logout" class="g">Log out</button>
+      </div>
+      <div class="big"><b id="count">0</b> checked in</div>
+      <input id="q" placeholder="Search name">
+      <div class="bar">
+        <button id="csvDay">Download this day (CSV)</button>
+        <button id="csvAll" class="g">Download all days</button>
+      </div>
+    </div>
+    <div class="card"><div id="list"></div></div>
+
+    <div class="card">
+      <h2>Printable QR poster</h2>
+      <input id="ptitle" placeholder="Poster title, e.g. Sunday Service Check-In">
+      <button id="printBtn" class="full">Print poster</button>
+      <p class="mu">The QR code points to this page without the admin part. Print it and paste it on the wall.</p>
+    </div>
+  </div>
+</section>
+
+<div id="poster">
+  <h1 id="posterTitle">Check In Here</h1>
+  <p>Scan with your phone camera and type your name</p>
+  <div id="posterQr"></div>
+</div>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+// ====== 1. PUT YOUR SUPABASE DETAILS HERE ======
+var SUPABASE_URL = 'https://tycsyppqrchzhwqjxbqx.supabase.co';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5Y3N5cHBxcmNoemh3cWp4YnF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3OTIyMTMsImV4cCI6MjEwODM2ODIxM30.370XWCiwOjZ5r7GaguTuh64Eg1pM6SHTcMJnDlWv__0';
+// ================================================
+
+(function(){
+function $(i){return document.getElementById(i)}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function today(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function tm(t){return new Date(t).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}
+function dt(t){return new Date(t).toLocaleString([], {year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
+function msg(id,text,ok){$(id).innerHTML='<div class="msg '+(ok?'ok':'er')+'">'+esc(text)+'</div>'}
+function ready(){return SUPABASE_URL.indexOf('YOUR-PROJECT')<0}
+
+function show(){
+  var isAdmin=location.hash==='#admin';
+  $('attendee').classList.toggle('hide',isAdmin);
+  $('admin').classList.toggle('hide',!isAdmin);
+  if(isAdmin)initAdmin();
+}
+window.addEventListener('hashchange',show);
+
+// ---------- Attendee ----------
+function deviceId(){
+  try{
+    var d=localStorage.getItem('att-device');
+    if(!d){d=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);localStorage.setItem('att-device',d)}
+    return d;
+  }catch(e){return 'nodevice-'+Math.random().toString(36).slice(2)}
+}
+(function(){var d=new Date();$('arr').value=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')})();
+var doneKey='att-done-'+today();
+function alreadyDone(){try{return localStorage.getItem(doneKey)}catch(e){return null}}
+function lockForm(){$('go').disabled=true;$('nm').disabled=true;$('arr').disabled=true}
+if(alreadyDone()){lockForm();msg('aMsg','This phone has already checked in today as '+alreadyDone()+'.',true)}
+
+$('go').onclick=function(){
+  var name=$('nm').value.trim().replace(/\s+/g,' ');
+  var arr=$('arr').value;
+  if(!name){msg('aMsg','Please type your name.',false);return}
+  if(!arr){msg('aMsg','Please enter the time you arrived.',false);return}
+  if(alreadyDone()){lockForm();msg('aMsg','This phone has already checked in today.',true);return}
+  if(!ready()){msg('aMsg','App not set up yet: add the Supabase details.',false);return}
+  $('go').disabled=true;
+  fetch(SUPABASE_URL+'/rest/v1/checkins',{
+    method:'POST',
+    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
+    body:JSON.stringify({name:name,day:today(),arrival_time:arr,device_id:deviceId()})
+  }).then(function(r){
+    if(r.status===201){
+      try{localStorage.setItem(doneKey,name)}catch(e){}
+      msg('aMsg','Thank you, '+name+'! Your arrival at '+arr+' has been recorded.',true);
+      lockForm();
+    }else if(r.status===409){
+      try{localStorage.setItem(doneKey,name)}catch(e){}
+      lockForm();
+      msg('aMsg','Already recorded: this phone or name has checked in today.',true);
+    }else{
+      msg('aMsg','Could not check in. Please try again.',false);
+      $('go').disabled=false;
+    }
+  }).catch(function(){msg('aMsg','No internet connection. Please try again.',false);$('go').disabled=false});
+};
+$('nm').addEventListener('keydown',function(e){if(e.key==='Enter')$('go').click()});
+
+// ---------- Admin ----------
+var token=null,rows=[],inited=false;
+try{token=sessionStorage.getItem('att-token')}catch(e){}
+
+function hdr(){return{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+token}}
+
+function initAdmin(){
+  if(!inited){inited=true;$('day').value=today();$('ptitle').value='Check In Here'}
+  $('login').classList.toggle('hide',!!token);
+  $('panel').classList.toggle('hide',!token);
+  if(token)load();
+}
+
+$('loginBtn').onclick=function(){
+  if(!ready()){msg('lMsg','Add your Supabase details first.',false);return}
+  fetch(SUPABASE_URL+'/auth/v1/token?grant_type=password',{
+    method:'POST',
+    headers:{'apikey':SUPABASE_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({email:$('em').value.trim(),password:$('pw').value})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.access_token){
+      token=d.access_token;
+      try{sessionStorage.setItem('att-token',token)}catch(e){}
+      $('pw').value='';$('lMsg').innerHTML='';initAdmin();
+    }else msg('lMsg','Wrong email or password.',false);
+  }).catch(function(){msg('lMsg','Connection problem.',false)});
+};
+
+$('logout').onclick=function(){token=null;try{sessionStorage.removeItem('att-token')}catch(e){}initAdmin()};
+
+function load(){
+  fetch(SUPABASE_URL+'/rest/v1/checkins?day=eq.'+$('day').value+'&order=created_at.asc',{headers:hdr()})
+  .then(function(r){
+    if(r.status===401){token=null;try{sessionStorage.removeItem('att-token')}catch(e){}initAdmin();return null}
+    return r.json();
+  }).then(function(d){if(d){rows=d;draw()}});
+}
+
+function draw(){
+  var q=$('q').value.trim().toLowerCase();
+  var shown=rows.filter(function(r){return r.name.toLowerCase().indexOf(q)>=0});
+  $('count').textContent=rows.length;
+  $('list').innerHTML=shown.length?shown.map(function(r,i){
+    return '<div class="row"><div>'+(i+1)+'. '+esc(r.name)+'<div class="mu">Arrived '+esc(r.arrival_time||'-')+' · submitted '+tm(r.created_at)+'</div></div><button class="g" data-id="'+r.id+'">Delete</button></div>';
+  }).join(''):'<div class="mu">No check-ins for this day.</div>';
+}
+
+$('list').onclick=function(e){
+  var id=e.target.getAttribute&&e.target.getAttribute('data-id');
+  if(!id||!confirm('Delete this check-in?'))return;
+  fetch(SUPABASE_URL+'/rest/v1/checkins?id=eq.'+id,{method:'DELETE',headers:hdr()}).then(load);
+};
+$('day').onchange=load;$('refresh').onclick=load;$('q').oninput=draw;
+
+function csv(data,name){
+  var lines=[['name','date','arrival_time','submitted_at']].concat(data.map(function(r){
+    var d=new Date(r.created_at);
+    return [r.name,r.day,r.arrival_time||'',d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})];
+  }));
+  var text=lines.map(function(l){return l.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"'}).join(',')}).join('\n');
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv'}));
+  a.download=name;a.click();
+}
+$('csvDay').onclick=function(){csv(rows,'attendance-'+$('day').value+'.csv')};
+$('csvAll').onclick=function(){
+  fetch(SUPABASE_URL+'/rest/v1/checkins?order=created_at.asc&limit=100000',{headers:hdr()})
+  .then(function(r){return r.json()}).then(function(d){csv(d,'attendance-all.csv')});
+};
+
+$('printBtn').onclick=function(){
+  $('posterTitle').textContent=$('ptitle').value||'Check In Here';
+  $('posterQr').innerHTML='';
+  new QRCode($('posterQr'),{text:location.origin+location.pathname,width:340,height:340});
+  setTimeout(function(){window.print()},300);
+};
+
+show();
+})();
+</script>
+</body>
+</html>
